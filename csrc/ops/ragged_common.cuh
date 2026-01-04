@@ -86,32 +86,32 @@ __device__ bool walk_down_tensor_storage_tree_(
 
 #define UNPACK(...) __VA_ARGS__
 
-#define LAUNCH_KERNEL_SHMEM_DISPATCH(KERNEL, TEMPLATE_ARGS, GRID, BLOCK,  \
-                                     REQUIRED_SHMEM, STREAM, ...)         \
-  do {                                                                    \
-    size_t shared_mem_per_block =                                         \
-        at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;        \
-                                                                          \
-    cudaFuncAttributes attr;                                              \
-    cudaError_t err =                                                     \
-        cudaFuncGetAttributes(&attr, KERNEL<UNPACK TEMPLATE_ARGS, true>); \
-                                                                          \
-    bool attr_query_ok = (err == cudaSuccess);                            \
-                                                                          \
-    size_t static_shared_mem = attr_query_ok ? attr.sharedSizeBytes : 0;  \
-    size_t total_shared_mem = REQUIRED_SHMEM + static_shared_mem + 256;   \
-                                                                          \
-    bool use_shared_mem = (attr_query_ok && REQUIRED_SHMEM > 0 &&         \
-                           total_shared_mem <= shared_mem_per_block);     \
-                                                                          \
-    if (use_shared_mem) {                                                 \
-      KERNEL<UNPACK TEMPLATE_ARGS, true>                                  \
-          <<<GRID, BLOCK, REQUIRED_SHMEM, STREAM>>>(__VA_ARGS__);         \
-    } else {                                                              \
-      KERNEL<UNPACK TEMPLATE_ARGS, false>                                 \
-          <<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__);                      \
-    }                                                                     \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
+#define LAUNCH_KERNEL_SHMEM_DISPATCH(KERNEL, TEMPLATE_ARGS, GRID, BLOCK, \
+                                     REQUIRED_SHMEM, STREAM, ...)        \
+  do {                                                                   \
+    size_t shared_mem_per_block =                                        \
+        at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;       \
+                                                                         \
+    cudaFuncAttributes attr;                                             \
+    cudaError_t err = cudaFuncGetAttributes(                             \
+        &attr, (const void *)KERNEL<UNPACK TEMPLATE_ARGS, true>);        \
+                                                                         \
+    bool attr_query_ok = (err == cudaSuccess);                           \
+                                                                         \
+    size_t static_shared_mem = attr_query_ok ? attr.sharedSizeBytes : 0; \
+    size_t total_shared_mem = REQUIRED_SHMEM + static_shared_mem + 256;  \
+                                                                         \
+    bool use_shared_mem = (attr_query_ok && REQUIRED_SHMEM > 0 &&        \
+                           total_shared_mem <= shared_mem_per_block);    \
+                                                                         \
+    if (use_shared_mem) {                                                \
+      KERNEL<UNPACK TEMPLATE_ARGS, true>                                 \
+          <<<GRID, BLOCK, REQUIRED_SHMEM, STREAM>>>(__VA_ARGS__);        \
+    } else {                                                             \
+      KERNEL<UNPACK TEMPLATE_ARGS, false>                                \
+          <<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__);                     \
+    }                                                                    \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                      \
   } while (0)
 
 template <typename index_t>
