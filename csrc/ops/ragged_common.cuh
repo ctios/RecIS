@@ -86,27 +86,38 @@ __device__ bool walk_down_tensor_storage_tree_(
 
 #define UNPACK(...) __VA_ARGS__
 
-#define LAUNCH_KERNEL_SHMEM_DISPATCH(KERNEL, TEMPLATE_ARGS, GRID, BLOCK, \
-                                     REQUIRED_SHMEM, STREAM, ...)        \
-  do {                                                                   \
-    size_t shared_mem_per_block =                                        \
-        at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;       \
-    bool use_shared_mem =                                                \
-        (REQUIRED_SHMEM > 0 && REQUIRED_SHMEM <= shared_mem_per_block);  \
-    if (use_shared_mem) {                                                \
-      KERNEL<UNPACK TEMPLATE_ARGS, true>                                 \
-          <<<GRID, BLOCK, REQUIRED_SHMEM, STREAM>>>(__VA_ARGS__);        \
-    } else {                                                             \
-      KERNEL<UNPACK TEMPLATE_ARGS, false>                                \
-          <<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__);                     \
-    }                                                                    \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                      \
+#define LAUNCH_KERNEL_SHMEM_DISPATCH(KERNEL, TEMPLATE_ARGS, GRID, BLOCK,  \
+                                     REQUIRED_SHMEM, STREAM, ...)         \
+  do {                                                                    \
+    size_t shared_mem_per_block =                                         \
+        at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;        \
+                                                                          \
+    cudaFuncAttributes attr;                                              \
+    cudaError_t err =                                                     \
+        cudaFuncGetAttributes(&attr, KERNEL<UNPACK TEMPLATE_ARGS, true>); \
+                                                                          \
+    bool attr_query_ok = (err == cudaSuccess);                            \
+                                                                          \
+    size_t static_shared_mem = attr_query_ok ? attr.sharedSizeBytes : 0;  \
+    size_t total_shared_mem = REQUIRED_SHMEM + static_shared_mem + 256;   \
+                                                                          \
+    bool use_shared_mem = (attr_query_ok && REQUIRED_SHMEM > 0 &&         \
+                           total_shared_mem <= shared_mem_per_block);     \
+                                                                          \
+    if (use_shared_mem) {                                                 \
+      KERNEL<UNPACK TEMPLATE_ARGS, true>                                  \
+          <<<GRID, BLOCK, REQUIRED_SHMEM, STREAM>>>(__VA_ARGS__);         \
+    } else {                                                              \
+      KERNEL<UNPACK TEMPLATE_ARGS, false>                                 \
+          <<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__);                      \
+    }                                                                     \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
   } while (0)
 
 template <typename index_t>
-__device__ __host__ __forceinline__ index_t binary_search(index_t index,
-                                                          const index_t *splits,
-                                                          index_t splits_size) {
+__device__ __host__ __inline__ index_t binary_search(index_t index,
+                                                     const index_t *splits,
+                                                     index_t splits_size) {
   index_t l = 0, r = splits_size - 2;  // splits_size is definitely >= 2
   while (l <= r) {
     index_t mid = (l + r) >> 1;
@@ -121,9 +132,9 @@ __device__ __host__ __forceinline__ index_t binary_search(index_t index,
   return -1;
 }
 
-__device__ __host__ __forceinline__ uint64_t murmur_hash_64(uint64_t *keys,
-                                                            uint64_t seed,
-                                                            int size) {
+__device__ __host__ __inline__ uint64_t murmur_hash_64(uint64_t *keys,
+                                                       uint64_t seed,
+                                                       int size) {
   const uint64_t m = 0xc6a4a7935bd1e995ULL;
   const int r = 47;
   uint64_t len = size * sizeof(uint64_t);

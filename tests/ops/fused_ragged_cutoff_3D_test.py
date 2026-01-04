@@ -138,6 +138,23 @@ class TestFusedCutOffConsistency(unittest.TestCase):
             self.keep_lengths_list[torch.float32].append(i % 8 + 20)
             self.drop_sides_list[torch.float32].append(False)
             self.pad_sides_list[torch.float32].append(False)
+
+        for i in range(10):
+            val, offsets, max_lens = gen_ragged_tensor(
+                bs=923,  # 924 * 4. (bs + 1) * 4 = 3,696 bytes
+                min_seq=70,  # (bs * seq + 1) * 4 = 258,444 bytes
+                max_seq=70,
+                max_n=10,
+                min_n=1,
+                dtype=torch.float64,
+            )
+            self.fused_vals[torch.int64].append(val.cuda())
+            self.fused_offsets[torch.int64].append(offsets[0].cuda())
+            self.fused_inner_offsets[torch.int64].append(offsets[1].cuda())
+            self.keep_lengths_list[torch.int64].append(i + 3)
+            self.drop_sides_list[torch.int64].append(False)
+            self.pad_sides_list[torch.int64].append(False)
+
         for dt in [torch.float64, torch.int64, torch.int32, torch.float32]:
             self.keep_lengths[dt] = torch.tensor(
                 self.keep_lengths_list[dt], dtype=torch.int32

@@ -136,16 +136,20 @@ fused_ragged_cutoff_2D(std::vector<at::Tensor> values,
     cutoff_values = at::cat(values, 0);
   }
 
-  at::parallel_for(0, fea_num, 1, [&](int64_t beg, int64_t end) {
-    for (int i = beg; i < end; ++i) {
-      drop_nums_vec[i] = drop_nums.slice(0, fea_offset[i], fea_offset[i + 1]);
-      pad_nums_vec[i] = pad_nums.slice(0, fea_offset[i], fea_offset[i + 1]);
-      ragged_offsets_vec[i] =
-          cutoff_offsets.slice(0, fea_offset[i] + i, fea_offset[i + 1] + i + 1);
-      ragged_val_vec[i] = cutoff_values.slice(0, output_val_fea_offset_acc[i],
-                                              output_val_fea_offset_acc[i + 1]);
-    }
-  });
+  std::vector<int64_t> pad_drop_split_sizes(fea_num);
+  std::vector<int64_t> offset_split_sizes(fea_num);
+  std::vector<int64_t> val_split_sizes(fea_num);
+  for (int64_t i = 0; i < fea_num; ++i) {
+    pad_drop_split_sizes[i] = fea_offset[i + 1] - fea_offset[i];
+    offset_split_sizes[i] = fea_offset[i + 1] - fea_offset[i] + 1;
+    val_split_sizes[i] =
+        output_val_fea_offset_acc[i + 1] - output_val_fea_offset_acc[i];
+  }
+  drop_nums_vec = at::split_with_sizes(drop_nums, pad_drop_split_sizes, 0);
+  pad_nums_vec = at::split_with_sizes(pad_nums, pad_drop_split_sizes, 0);
+  ragged_offsets_vec =
+      at::split_with_sizes(cutoff_offsets, offset_split_sizes, 0);
+  ragged_val_vec = at::split_with_sizes(cutoff_values, val_split_sizes, 0);
 
   return std::make_tuple(ragged_val_vec, ragged_offsets_vec, drop_nums_vec,
                          pad_nums_vec, drop_sides, pad_sides);
@@ -290,21 +294,21 @@ fused_ragged_cutoff_3D(std::vector<at::Tensor> values,
     cutoff_values = at::cat(values, 0);
   }
 
-  at::parallel_for(
-      /* begin */ 0,
-      /* end   */ fea_num,
-      /* grain_size */ 1, [&](int64_t beg, int64_t end) {
-        for (int i = beg; i < end; ++i) {
-          ragged_outer_offsets_vec[i] = output_outer_offsets.slice(
-              0, fea_seq_offset[i] + i, fea_seq_offset[i + 1] + i + 1);
-          ragged_inner_offsets_vec[i] = output_inner_offsets.slice(
-              0, output_inner_fea_offset[i] + i,
-              output_inner_fea_offset[i + 1] + i + 1);
-          ragged_val_vec[i] =
-              cutoff_values.slice(0, output_val_fea_offset_acc[i],
-                                  output_val_fea_offset_acc[i + 1]);
-        }
-      });
+  std::vector<int64_t> outer_split_sizes(fea_num);
+  std::vector<int64_t> inner_split_sizes(fea_num);
+  std::vector<int64_t> val_split_sizes(fea_num);
+  for (int64_t i = 0; i < fea_num; ++i) {
+    outer_split_sizes[i] = fea_seq_offset[i + 1] - fea_seq_offset[i] + 1;
+    inner_split_sizes[i] =
+        output_inner_fea_offset[i + 1] - output_inner_fea_offset[i] + 1;
+    val_split_sizes[i] =
+        output_val_fea_offset_acc[i + 1] - output_val_fea_offset_acc[i];
+  }
+  ragged_outer_offsets_vec =
+      at::split_with_sizes(output_outer_offsets, outer_split_sizes, 0);
+  ragged_inner_offsets_vec =
+      at::split_with_sizes(output_inner_offsets, inner_split_sizes, 0);
+  ragged_val_vec = at::split_with_sizes(cutoff_values, val_split_sizes, 0);
 
   return std::make_tuple(ragged_val_vec, ragged_outer_offsets_vec,
                          ragged_inner_offsets_vec);

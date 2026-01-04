@@ -42,8 +42,8 @@ namespace cub = hipcub;
 
 template <typename index_t>
 __global__ void post_cutoff_lens_kernel(
-    // __grid_constant__ annotation is only allowed for architecture compute_70
-    // or later
+    // __grid_constant__ annotation is only allowed for architecture
+    // compute_70 or later
     const index_t** __restrict__ offsets,
     const index_t* __restrict__ keep_lengths,
     const index_t* __restrict__ fea_offset, index_t* __restrict__ cutoff_lens,
@@ -91,7 +91,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> post_cutoff_lens_cuda_op(
              fea_num),
       thread(MAX_THREADS_PER_BLOCK);
 
-  auto cutoff_lens = at::empty({total_rows}, offsets.front().options());  // gpu
+  auto cutoff_lens = at::empty({total_rows}, offsets.front().options());
   auto drop_nums = at::empty({total_rows}, offsets.front().options());
   auto pad_nums = at::empty({total_rows}, offsets.front().options());
   AT_DISPATCH_INDEX_TYPES(
@@ -111,12 +111,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> post_cutoff_lens_cuda_op(
 }
 
 template <typename value_t, typename ScanTileStateT, int BLOCK_THREADS>
-__global__ void seg_scan_sum_kernel(
-    const value_t* __restrict__ values, const value_t* __restrict__ fea_offsets,
-    value_t* __restrict__ offsets,
-    value_t* __restrict__ inclusive_sums_per_feature,
-    //__restrict__ ScanTileStateT* tile_states,
-    ScanTileStateT* tile_states, const int fea_num, int max_tiles_per_fea) {
+__global__ void __launch_bounds__(MAX_THREADS_PER_BLOCK, 2)
+    seg_scan_sum_kernel(const value_t* __restrict__ values,
+                        const value_t* __restrict__ fea_offsets,
+                        value_t* __restrict__ offsets,
+                        value_t* __restrict__ inclusive_sums_per_feature,
+                        //__restrict__ ScanTileStateT* tile_states,
+                        ScanTileStateT* tile_states, const int fea_num,
+                        int max_tiles_per_fea) {
   int fea = blockIdx.y;
   int tile_idx = blockIdx.x;
   int tid = threadIdx.x + blockDim.x * blockIdx.x;
@@ -248,6 +250,7 @@ std::tuple<at::Tensor, at::Tensor> seg_scan_cuda(at::Tensor fea_offset,
         dim3((max_tiles + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK,
              fea_num);
     auto init_threads = dim3(MAX_THREADS_PER_BLOCK);
+
     SegScanInitKernel<ScanTileStateT><<<init_blocks, init_threads, 0, stream>>>(
         tile_states.data(), max_tiles);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -400,8 +403,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> seg_gen_offsets_cuda(
 
   AT_DISPATCH_INDEX_TYPES(
       inner_offsets.front().scalar_type(), "seg_gen_offsets_cuda_op", [&] {
-        // using index_t = int32_t;
-
         cuda::CudaVecParam<index_t*> outer_offsets_ptrs(fea_num, stream);
         cuda::CudaVecParam<index_t*> inner_offsets_ptrs(fea_num, stream);
         for (int i = 0; i < fea_num; ++i) {
@@ -429,6 +430,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> seg_gen_offsets_cuda(
             (max_tiles + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK,
             fea_num);
         auto init_threads = dim3(MAX_THREADS_PER_BLOCK);
+
         SegScanInitKernel<ScanTileStateT>
             <<<init_blocks, init_threads, 0, stream>>>(tile_states.data(),
                                                        max_tiles);
@@ -460,19 +462,22 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> seg_gen_offsets_cuda(
 }
 
 template <typename index_t, typename value_t, bool use_shared_mem>
-__global__ void fused_ragged_cutoff_3D_kernel(
-    const index_t** __restrict__ offsets,        // input outer offset
-    const index_t** __restrict__ inner_offsets,  // input inner offset
-    const value_t** __restrict__ values,
-    const index_t* __restrict__ output_inner_offsets,
-    value_t* __restrict__ cutoff_values, const index_t* __restrict__ fea_offset,
-    const index_t* __restrict__ output_inner_fea_offset,
-    const index_t* __restrict__ output_val_fea_offset,
-    const index_t* __restrict__ drop_num,
-    const bool* __restrict__ drop_sides,  // true: drop left; false: drop right
-    const index_t* __restrict__ pad_num,
-    const bool* __restrict__ pad_sides,  // true: pad left; false: pad right
-    const index_t* __restrict__ keep_lens, const int fea_num) {
+__global__ void __launch_bounds__(MAX_THREADS_PER_BLOCK, 2)
+    fused_ragged_cutoff_3D_kernel(
+        const index_t** __restrict__ offsets,        // input outer offset
+        const index_t** __restrict__ inner_offsets,  // input inner offset
+        const value_t** __restrict__ values,
+        const index_t* __restrict__ output_inner_offsets,
+        value_t* __restrict__ cutoff_values,
+        const index_t* __restrict__ fea_offset,
+        const index_t* __restrict__ output_inner_fea_offset,
+        const index_t* __restrict__ output_val_fea_offset,
+        const index_t* __restrict__ drop_num,
+        const bool* __restrict__ drop_sides,  // true: drop left; false: drop
+                                              // right
+        const index_t* __restrict__ pad_num,
+        const bool* __restrict__ pad_sides,  // true: pad left; false: pad right
+        const index_t* __restrict__ keep_lens, const int fea_num) {
   int tid = threadIdx.x;
   int data_id = threadIdx.x + blockDim.x * blockIdx.x;
   int stride = blockDim.x * gridDim.x;
@@ -638,15 +643,19 @@ void fused_ragged_cutoff_3D_cuda_op(
 }
 
 template <typename index_t, typename value_t, bool use_shared_mem>
-__global__ void fused_ragged_cutoff_2D_kernel(
-    const index_t** __restrict__ offsets, const value_t** __restrict__ values,
-    const index_t* __restrict__ cutoff_offsets,
-    value_t* __restrict__ cutoff_values, const index_t* __restrict__ fea_offset,
-    const index_t* __restrict__ output_val_fea_offset,
-    const index_t* __restrict__ drop_num, const index_t* __restrict__ pad_num,
-    const index_t* __restrict__ keep_lens,
-    const index_t* __restrict__ cutoff_val_nums, const int fea_num,
-    const bool* __restrict__ sides) {  // true: drop left; false: drop right
+__global__ void __launch_bounds__(MAX_THREADS_PER_BLOCK, 2)
+    fused_ragged_cutoff_2D_kernel(
+        const index_t** __restrict__ offsets,
+        const value_t** __restrict__ values,
+        const index_t* __restrict__ cutoff_offsets,
+        value_t* __restrict__ cutoff_values,
+        const index_t* __restrict__ fea_offset,
+        const index_t* __restrict__ output_val_fea_offset,
+        const index_t* __restrict__ drop_num,
+        const index_t* __restrict__ pad_num,
+        const index_t* __restrict__ keep_lens,
+        const index_t* __restrict__ cutoff_val_nums, const int fea_num,
+        const bool* __restrict__ sides) {  // true: drop left; false: drop right
   int tid = threadIdx.x;
   int data_id = threadIdx.x + blockDim.x * blockIdx.x;
   int stride = blockDim.x * gridDim.x;
@@ -706,7 +715,6 @@ __global__ void fused_ragged_cutoff_2D_kernel(
     // fea for fix due to cutoff_offset is inclusive sum + exclusive sum
     cutoff_offset = cutoff_offsets + fea + fea_beg;
     cutoff_value = cutoff_values + output_fea_beg;
-
 #pragma unroll
     for (index_t did = data_id; did < data_max; did += stride) {
       row = binary_search(did, offset, row_max + 1);
