@@ -103,6 +103,7 @@ The RecIS framework implements efficient dynamic embeddings (HashTable) through 
   - [MOON Embedding](https://arxiv.org/abs/2511.11305): MOON Embedding: Multimodal Representation Learning for E-commerce Search Advertising.
   - [MOON](https://arxiv.org/abs/2508.11999): Generative MLLM-based Multimodal Representation Learning for E-commerce Product Understanding.
   - [LUM](https://arxiv.org/abs/2502.08309): Unlocking Scaling Law in Industrial Recommendation Systems with a Three-step Paradigm based Large User Model.
+  - [MUSE](https://taobao-mm.github.io): A Simple Yet Effective Multimodal Search-Based Framework for Lifelong User Interest Modeling
 
 ## 📚 Documentation
 
