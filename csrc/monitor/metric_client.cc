@@ -14,6 +14,7 @@
 
 extern "C" {
 #include "monitor/log_writer.h"
+#include "monitor/sock_writer.h"
 }
 
 #include "monitor/metric_client.h"
@@ -122,50 +123,128 @@ unique_ptr<Estimator> Estimator::NewEstimator(PointType pType) {
   return estimator_p_;
 }
 
+/* -------- Writer -------- */
+class RecisMonitorWriter {
+ public:
+  enum WriteType : int32_t {
+    kEmpty = 0,
+    kUDS = 1,
+    kLog = 2,
+    kInvalid = INT32_MAX
+  };
+  RecisMonitorWriter(const char* base_path);
+  ~RecisMonitorWriter();
+  int write(const char* msg);
+
+ private:
+  WriteType writer_type_;
+  unique_ptr<RECIS_MONITOR_LOG_WRITER_T> log_writer_;
+  unique_ptr<RECIS_MONITOR_SOCK_WRITER> sock_writer_;
+};
+RecisMonitorWriter::RecisMonitorWriter(const char* base_path) {
+  const char* writer_type_s_ = std::getenv("RECIS_MONITOR_WRITER");
+  writer_type_ =
+      static_cast<WriteType>(atoi(writer_type_s_ ? writer_type_s_ : "1"));
+  std::string writer_logname(base_path);
+  std::string default_logname = "./log/";
+  if (std::getenv("STD_LOG_DIR")) {
+    default_logname = std::getenv("STD_LOG_DIR");
+  }
+  if (default_logname.back() != '/') {
+    default_logname += '/';
+  }
+  switch (writer_type_) {
+    case RecisMonitorWriter::WriteType::kEmpty:
+      break;
+    case RecisMonitorWriter::WriteType::kUDS: {
+      if (writer_logname.empty()) {
+        writer_logname = default_logname + "/recis_metric.sock";
+        // E.g. ./log/recis_metric.sock
+      }
+      sock_writer_.reset(new RECIS_MONITOR_SOCK_WRITER(writer_logname.c_str()));
+      break;
+    }
+    case RecisMonitorWriter::WriteType::kLog: {
+      if (writer_logname.empty()) {
+        default_logname += (std::getenv("RANK") ? std::getenv("RANK") : "0");
+        writer_logname = default_logname + "/recis_metric.log";
+        // E.g. ./log/0/recis_metric.log
+      }
+      log_writer_.reset(new RECIS_MONITOR_LOG_WRITER_T());
+      int ret = recis_monitor_init_logger(
+          log_writer_.get(), writer_logname.c_str(),
+          RECIS_MONITOR_LOG_ROTATE_T::RECIS_MONITOR_LOG_ROTATE_DEFAULT);
+      if (ret != 0) {
+        throw std::runtime_error(
+            "Metric Writer construct error, writer_ init ret: " +
+            std::to_string(ret));
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+RecisMonitorWriter::~RecisMonitorWriter() {
+  switch (writer_type_) {
+    case RecisMonitorWriter::WriteType::kEmpty:
+      return;
+    case RecisMonitorWriter::WriteType::kUDS: {
+      sock_writer_.reset();
+      return;
+    }
+    case RecisMonitorWriter::WriteType::kLog: {
+      recis_monitor_close_logger(log_writer_.get());
+      log_writer_.reset();
+      return;
+    }
+    default:
+      return;
+  }
+}
+int RecisMonitorWriter::write(const char* msg) {
+  switch (writer_type_) {
+    case RecisMonitorWriter::WriteType::kEmpty: {
+      return 0;
+    }
+    case RecisMonitorWriter::WriteType::kUDS: {
+      return sock_writer_->write(msg);
+    }
+    case RecisMonitorWriter::WriteType::kLog: {
+      return recis_monitor_logger_write(log_writer_.get(), msg, true);
+    }
+    default: {
+      return -1;
+    }
+  }
+}
+
 /* -------- Factory -------- */
-Factory::Factory(const string& base_log, chrono::seconds interval)
+Factory::Factory(const string& base_path, chrono::seconds interval)
     : interval_(interval) {
-  std::string writer_logname(base_log.data(), base_log.size());
-  if (writer_logname.empty()) {
-    std::string default_logname = "./log/";
-    if (std::getenv("STD_LOG_DIR")) {
-      default_logname = std::getenv("STD_LOG_DIR");
-    }
-    if (default_logname.back() != '/') {
-      default_logname += '/';
-    }
-    default_logname += (std::getenv("RANK") ? std::getenv("RANK") : "0");
-    writer_logname = default_logname +
-                     "/recis_metric.log";  // E.g. /var/log/0/recis_metric.log,
-                                           // ~/project/log/0/recis_metric.log
-  }
-  writer_.reset(new RECIS_MONITOR_LOG_WRITER_T());
-  int ret = recis_monitor_init_logger(
-      writer_.get(), writer_logname.c_str(),
-      RECIS_MONITOR_LOG_ROTATE_T::RECIS_MONITOR_LOG_ROTATE_DEFAULT);
-  if (ret != 0) {
-    throw std::runtime_error(
-        "Metric Factory construct error, writer_ init ret: " +
-        std::to_string(ret));
-  }
+  writer_.reset(new RecisMonitorWriter(base_path.c_str()));
   DaemonThreadLaunch();
 }
 Factory::~Factory() {
   DaemonThreadJoin();
 
-  std::lock_guard<mutex> lg(cv_mutex_);
-  for (map<string, shared_ptr<Client>>::iterator it = clients_.begin();
-       it != clients_.end(); ++it) {
-    it->second.reset();
-  }
+  {
+    std::lock_guard<mutex> lg(cv_mutex_);
+    for (map<string, shared_ptr<Client>>::iterator it = clients_.begin();
+         it != clients_.end(); ++it) {
+      it->second.reset();
+    }
+    clients_.clear();
 #ifdef TORCH_EXTENSION_NAME
-  for (map<string, c10::intrusive_ptr<Client>>::iterator it =
-           clients_py_.begin();
-       it != clients_py_.end(); ++it) {
-    it->second.reset();
-  }
+    for (map<string, c10::intrusive_ptr<Client>>::iterator it =
+             clients_py_.begin();
+         it != clients_py_.end(); ++it) {
+      it->second.reset();
+    }
+    clients_py_.clear();
 #endif
-  recis_monitor_close_logger(writer_.get());
+  }
+  writer_.reset();
 }
 void Factory::DaemonThreadLaunch() {
   if (!running_.load(std::memory_order_seq_cst)) {
@@ -195,17 +274,17 @@ void Factory::DaemonThread() {
   std::ostringstream oss;
   oss.setf(std::ios::fixed);
   oss << std::setprecision(6);
-
   for (std::unique_lock<mutex> lk(cv_mutex_); running_.load();
        last_snapshot_ += interval_) {
     cv_.wait_until(lk, last_snapshot_, [this] { return !running_.load(); });
-
+    if (!running_.load()) {
+      break;
+    }
     oss.str(string{});
+    chrono::milliseconds ms_now = chrono::duration_cast<chrono::milliseconds>(
+        chrono::system_clock::now().time_since_epoch());
     oss << "\n# BeginGroup recis.monitor.factory," << global_tag << "\t";
-    oss << std::to_string(chrono::duration_cast<chrono::milliseconds>(
-                              chrono::system_clock::now().time_since_epoch())
-                              .count())
-        << "\n";
+    oss << std::to_string(ms_now.count()) << "\n";
     {
       for (auto& it : clients_) {
         shared_ptr<Client>& client = it.second;
@@ -221,13 +300,10 @@ void Factory::DaemonThread() {
 #endif
     }
     oss << "# EndGroup recis.monitor.factory\t";
-    oss << std::to_string(chrono::duration_cast<chrono::milliseconds>(
-                              chrono::system_clock::now().time_since_epoch())
-                              .count())
-        << '\n';
-
-    recis_monitor_logger_write(writer_.get(), oss.str().c_str(), true);
-    // log_trace("metric periodic dump at: " << last_snapshot_);
+    oss << std::to_string(ms_now.count()) << "\n";
+    lk.unlock();  // avoiding deadlock from timeout or writer_ block
+    writer_->write(oss.str().c_str());
+    lk.lock();
   }
   // return; Release cv&mutex to join DaemonThread
 }
@@ -248,9 +324,9 @@ unique_ptr<Factory>& Factory::StaticInstance() {
   }
   return static_instance;
 }
-unique_ptr<Factory> Factory::MakeInstance(const string& base_log,
+unique_ptr<Factory> Factory::MakeInstance(const string& base_path,
                                           chrono::seconds interval) {
-  return unique_ptr<Factory>(new Factory(base_log, interval));
+  return unique_ptr<Factory>(new Factory(base_path, interval));
 }
 shared_ptr<Client> Factory::get_client(const string& client_name) {
   std::lock_guard<mutex> lg(cv_mutex_);
@@ -335,12 +411,19 @@ string Client::take_snapshot() {
     return string();
   }
 
-  const static map<PointType, string> TypeNameStr = {
-      {PointType::kGauge, "gauge"},
-      {PointType::kCounter, "count"},
-      {PointType::kSummary, "sumry"},
-      // {PointType::kHistogram, "histg"},
-      // {PointType::kHistogramFull, "histf"},
+  auto func_get_type_name = [](PointType pType) -> const char* {
+    switch (pType) {
+      case PointType::kGauge:
+        return "gauge";
+      case PointType::kCounter:
+        return "count";
+      case PointType::kSummary:
+        return "sumry";
+      // case PointType::kHistogram: return "histg";
+      // case PointType::kHistogramFull: return "histf";
+      default:
+        return "gauge";
+    }
   };
 
   std::ostringstream oss;
@@ -355,8 +438,8 @@ string Client::take_snapshot() {
       continue;
     }
     oss << client_name_ << "." << name
-        << ",__TP=" << TypeNameStr.at(estimator.pType);
-    if (!pTag->to_string().empty()) {
+        << ",__TP=" << func_get_type_name(estimator.pType);
+    if (pTag.get() && !pTag->to_string().empty()) {
       oss << "," << pTag->to_string();
     }
     oss << '\t';

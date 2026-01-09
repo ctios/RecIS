@@ -1,10 +1,13 @@
 import os
 from pathlib import Path
 
+import torch
+from packaging.version import Version
 from torch.profiler import ProfilerActivity, profile, schedule
 
 from recis.framework.filesystem import get_file_system
 from recis.hooks.hook import Hook
+from recis.hooks.initial_profiler_hook import _InitialProfilerHook
 from recis.info import is_internal_enabled
 from recis.utils.logger import Logger
 
@@ -51,24 +54,21 @@ class ProfilerHook(Hook):
     """
 
     def __init__(self, wait=1, warmup=48, active=1, repeat=4, output_dir="./"):
-        scheduler = schedule(wait=wait, warmup=warmup, active=active, repeat=repeat)
-        self.prof = profile(
-            activities=[
-                ProfilerActivity.CPU,
-                ProfilerActivity.CUDA,
-            ],
-            schedule=scheduler,
-            on_trace_ready=self.get_trace_handler(),
-            with_stack=True,
-            profile_memory=True,
-            record_shapes=True,
-            with_flops=True,
-        )
         self.logger = Logger("ProfilerHook")
+        assert wait > 0, "ProfilerHook wait must be greater than 0"
         if output_dir.startswith("model"):
             assert Mos is not None, "Cannot import mos, check interneal version."
             output_dir = Mos(output_dir).real_physical_path
         self.output_dir = output_dir
+
+        # leave the previous wait step for _InitialProfilerHook
+        self.wait = wait
+        self.warmup = warmup
+        self.active = active
+        self.repeat = repeat
+
+        self.prof = None
+        self.prof_step_count = 0
 
     def get_trace_handler(self):
         """Creates and returns a trace handler function for profiling results.
@@ -107,6 +107,55 @@ class ProfilerHook(Hook):
 
         return default_trace_handler
 
+    def get_prof_schedule(self):
+        version_current = Version(torch.__version__.split("+", 1)[0])
+        # torch 2.6.0 has skip_first_wait, could align skipped step with real step
+        version_with_smart_skip = Version("2.6.0")
+        if version_current >= version_with_smart_skip:
+            skip_first = self.wait + _InitialProfilerHook.StepDuration
+            scheduler = schedule(
+                wait=self.wait,
+                warmup=self.warmup,
+                active=self.active,
+                repeat=self.repeat,
+                skip_first=skip_first,
+                skip_first_wait=1,
+            )
+        else:
+            skip_first = _InitialProfilerHook.StepDuration
+            scheduler = schedule(
+                wait=self.wait,
+                warmup=self.warmup,
+                active=self.active,
+                repeat=self.repeat,
+                skip_first=skip_first,
+            )
+        prof = profile(
+            activities=[
+                ProfilerActivity.CPU,
+                ProfilerActivity.CUDA,
+            ],
+            schedule=scheduler,
+            on_trace_ready=self.get_trace_handler(),
+            with_stack=True,
+            profile_memory=True,
+            record_shapes=True,
+            with_flops=True,
+        )
+        return prof
+
+    def before_step(self, is_train=True, *args, **kwargs):
+        before_step_count = self.prof_step_count + 1
+        effective_step_count_begin = _InitialProfilerHook.StepDuration + 1
+
+        if before_step_count < effective_step_count_begin:
+            pass
+        elif before_step_count > effective_step_count_begin:
+            pass
+        else:
+            # before_step_count == general_step_count, initiallize profiler
+            self.prof = self.get_prof_schedule()
+
     def after_step(self, is_train=True, *args, **kwargs):
         """Called after each training step to advance the profiler.
 
@@ -123,4 +172,11 @@ class ProfilerHook(Hook):
             the wait, warmup, active, and repeat parameters provided during
             initialization.
         """
+        self.prof_step_count += 1
+        effective_step_count_begin = _InitialProfilerHook.StepDuration + 1
+
+        if self.prof_step_count < effective_step_count_begin:
+            return  # not my stage of after_steps
+        if self.prof is None:
+            return  # my stage, but not initialized yet
         self.prof.step()

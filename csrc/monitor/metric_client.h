@@ -19,7 +19,6 @@
 #ifdef TORCH_EXTENSION_NAME
 #include <torch/custom_class.h>
 #endif
-#include "monitor/log_writer.h"  //TODO: base_writer->{log_writer, sock_writer}
 #include "monitor/metric_estimator.h"
 
 namespace recis {
@@ -38,6 +37,7 @@ class Factory;
 class Client;
 class PointTag;
 enum PointType;  // Option: kGauge, kCounter, kSummary
+class RecisMonitorWriter;
 
 /**
  * PointTag: the tag for metric point
@@ -79,7 +79,7 @@ class Factory {
   constexpr static chrono::seconds SnapInterval = chrono::seconds(10);
 
  public:
-  Factory(const string& base_log = string(),
+  Factory(const string& base_path = string(),
           chrono::seconds interval = SnapInterval);
   ~Factory();
   Factory(const Factory&) = delete;
@@ -93,10 +93,10 @@ class Factory {
    */
   static unique_ptr<Factory>& StaticInstance();
   static unique_ptr<Factory> MakeInstance(
-      const string& base_log = string(),
+      const string& base_path = string(),
       chrono::seconds interval = SnapInterval);
-  static unique_ptr<Factory> MakeInstance(const string& base_log) {
-    return MakeInstance(base_log, SnapInterval);
+  static unique_ptr<Factory> MakeInstance(const string& base_path) {
+    return MakeInstance(base_path, SnapInterval);
   };
   static unique_ptr<Factory> MakeInstance(chrono::seconds interval) {
     return MakeInstance(string(), interval);
@@ -106,8 +106,8 @@ class Factory {
   shared_ptr<Client> get_client(const string& client_name);
 
 #ifdef TORCH_EXTENSION_NAME
-  static c10::intrusive_ptr<Factory> MakeInstancePy(const string& base_log) {
-    return c10::make_intrusive<Factory>(base_log);
+  static c10::intrusive_ptr<Factory> MakeInstancePy(const string& base_path) {
+    return c10::make_intrusive<Factory>(base_path);
   };
   c10::intrusive_ptr<Client> get_client_py(const string& client_name);
 #endif
@@ -126,7 +126,7 @@ class Factory {
 #ifdef TORCH_EXTENSION_NAME
   map<string, c10::intrusive_ptr<Client>> clients_py_;
 #endif
-  unique_ptr<RECIS_MONITOR_LOG_WRITER_T> writer_;
+  unique_ptr<RecisMonitorWriter> writer_;
 };
 
 /**

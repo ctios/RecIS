@@ -21,6 +21,7 @@ from recis.hooks.checkpoint_hooks import (
     CheckpointSaveArguments,
     CheckpointSaveHook,
 )
+from recis.hooks.initial_profiler_hook import _InitialProfilerHook
 from recis.hooks.metric_report_hook import MetricReportHook
 from recis.metrics.metric_reporter import MODEL_FWD_NAME, MetricReporter
 from recis.optim import sparse_optim
@@ -304,6 +305,7 @@ class Trainer:
                 self.saver, self._global_step, self._epoch, ckpt_load_arg
             )
         )
+        self.hooks.append(_InitialProfilerHook(scheduler=None))
         self.hooks.append(
             MetricReportHook(
                 model=self.model,

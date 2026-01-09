@@ -5,6 +5,7 @@ from typing import Optional
 from recis.hooks.hook import Hook
 from recis.metrics.metric_reporter import (
     EVAL_QPS_NAME,
+    FLOPS_NAME,
     HT_ALL_SLOT_BYTES,
     HT_ALLOCATOR_ID_ACT_SIZE,
     HT_ALLOCATOR_ID_TOTAL_SIZE,
@@ -26,6 +27,10 @@ class ReportArguments:
 
 
 class MetricReportHook(Hook):
+    _internal_profs = {
+        FLOPS_NAME: 0,
+    }
+
     def __init__(self, model, report_args: Optional[ReportArguments] = None):
         super().__init__()
         if report_args is None:
@@ -51,9 +56,16 @@ class MetricReportHook(Hook):
         qps = self.args.interval_step / spend_time
         train_qps = self.train_steps / spend_time
         eval_qps = self.eval_steps / spend_time
+        flops_total = (
+            self.__class__._internal_profs.get(FLOPS_NAME, 0)
+            * self.args.interval_step
+            / spend_time
+        )
         MetricReporter.report(QPS_NAME, qps, {"recis_qps_type": QPS_NAME})
         MetricReporter.report(QPS_NAME, train_qps, {"recis_qps_type": TRAIN_QPS_NAME})
         MetricReporter.report(QPS_NAME, eval_qps, {"recis_qps_type": EVAL_QPS_NAME})
+        MetricReporter.report(FLOPS_NAME, flops_total, {"recis_flops_type": FLOPS_NAME})
+
         # hashtable
         for ht_name, ht in self.hashtables.items():
             act_num, total_num = ht.id_info()

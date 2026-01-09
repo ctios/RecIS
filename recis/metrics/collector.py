@@ -503,6 +503,75 @@ class EventActor:
     }
 
     @staticmethod
+    def _parse_line_group(
+        line: str, parser_global_tags: dict[str, str]
+    ) -> dict[str, str]:
+        tuples: list[str] = line[1:].split()
+        tuples = [blob.strip() for blob in tuples if blob != ""]
+        if len(tuples) < 1:
+            return parser_global_tags
+        if tuples[0] == "BeginGroup" and len(tuples) >= 2:
+            parser_global_tags = {}
+            tags = tuples[1].split(",")
+            # group_name = tags[0]
+            tags = tags[1:]
+            for tag in tags:
+                k, v = tag.split("=")
+                if k in EventActor.ExcludeKeys:
+                    continue
+                if k in EventActor.OnameKeys:
+                    k = EventActor.OnameKeys[k]
+                parser_global_tags[k] = v
+        elif tuples[0] == "EndGroup":
+            pass
+        else:
+            pass
+        return parser_global_tags
+
+    @staticmethod
+    def _parse_line_event(line: str, parser_global_tags: dict[str, str]) -> Event:
+        # parse "name,tags   k1=v1,k2=v2    timestamp" . __TP is in tags key as Event.PointType
+        tuples = line.split()
+        if len(tuples) != 3:
+            flogger.warning("parse error for: {}".format(line[:256]))
+            return None
+        timestamp_ms = int(tuples[2])
+        name_tags = [blob.strip() for blob in tuples[0].split(",") if blob != ""]
+        if len(name_tags) < 1:
+            flogger.warning("parse error for: {}".format(line[:256]))
+            return None
+        name: str = name_tags[0]
+        point_type: int = Event.PointType.kGauge
+        tags = parser_global_tags.copy()
+        extra_tags = {}
+        for tag in name_tags[1:]:
+            k, v = tag.split("=")
+            if k == "__TP":
+                if v == "count":
+                    point_type = Event.PointType.kCounter
+                elif v == "sumry":
+                    point_type = Event.PointType.kSummary
+                else:
+                    point_type = Event.PointType.kGauge
+                continue
+            if k in EventActor.ExcludeKeys:
+                continue
+            if k in EventActor.OnameKeys:
+                k = EventActor.OnameKeys[k]
+                tags[k] = v
+            else:
+                extra_tags[k] = v
+        event = Event(
+            timestamp=timestamp_ms,
+            name=name,
+            tags=tags,
+            type=point_type,
+            content=tuples[1],
+            extra_tags=extra_tags,
+        )
+        return event
+
+    @staticmethod
     async def EventLogParser(
         filename: str, output_queue: asyncio.Queue[Event], interval: int = 2
     ):
@@ -558,68 +627,14 @@ class EventActor:
                 if len(line) <= 1:  # empty line
                     continue
                 if line.startswith("#"):
-                    tuples: list[str] = line[1:].split()
-                    tuples = [blob.strip() for blob in tuples if blob != ""]
-                    if len(tuples) < 1:
-                        continue
-                    if tuples[0] == "BeginGroup" and len(tuples) >= 2:
-                        parser_global_tags = {}
-                        tags = tuples[1].split(",")
-                        # group_name = tags[0]
-                        tags = tags[1:]
-                        for tag in tags:
-                            k, v = tag.split("=")
-                            if k in EventActor.ExcludeKeys:
-                                continue
-                            if k in EventActor.OnameKeys:
-                                k = EventActor.OnameKeys[k]
-                            parser_global_tags[k] = v
-                    elif tuples[0] == "EndGroup":
-                        pass
-                    else:
-                        pass
-                else:  # real data
-                    # parse "name,tags   k1=v1,k2=v2    timestamp" . __TP is in tags key as Event.PointType
-                    tuples = line.split()
-                    if len(tuples) != 3:
-                        flogger.warning("parse error for: {}".format(line[:256]))
-                        continue
-                    timestamp_ms = int(tuples[2])
-                    name_tags = [
-                        blob.strip() for blob in tuples[0].split(",") if blob != ""
-                    ]
-                    if len(name_tags) < 1:
-                        flogger.warning("parse error for: {}".format(line[:256]))
-                        continue
-                    name: str = name_tags[0]
-                    point_type: int = Event.PointType.kGauge
-                    tags = parser_global_tags.copy()
-                    extra_tags = {}
-                    for tag in name_tags[1:]:
-                        k, v = tag.split("=")
-                        if k == "__TP":
-                            if v == "count":
-                                point_type = Event.PointType.kCounter
-                            elif v == "sumry":
-                                point_type = Event.PointType.kSummary
-                            else:
-                                point_type = Event.PointType.kGauge
-                            continue
-                        if k in EventActor.ExcludeKeys:
-                            continue
-                        if k in EventActor.OnameKeys:
-                            k = EventActor.OnameKeys[k]
-                            tags[k] = v
-                        else:
-                            extra_tags[k] = v
-                    event = Event(
-                        timestamp=timestamp_ms,
-                        name=name,
-                        tags=tags,
-                        type=point_type,
-                        content=tuples[1],
-                        extra_tags=extra_tags,
+                    parser_global_tags = EventActor._parse_line_group(
+                        line, parser_global_tags
                     )
+                    continue
+                else:  # real data
+                    event = EventActor._parse_line_event(line, parser_global_tags)
+                    if event is None:
+                        continue
                     if event.lag_ms() > 10 * 60 * 1000:
                         flogger.debug(
                             f"event {event.name} lag_ms:{event.lag_ms()} too old, skip"
@@ -643,11 +658,140 @@ class EventActor:
                 )
 
     @staticmethod
+    async def EventSockParser(filename: str, output_queue: asyncio.Queue[Event]):
+        r"""
+        async tail -F filename
+        Args:
+            filename (str):   the filename to listen
+            output_queue (asyncio.Queue[Event]):  the output queue to store metric event
+            interval (int):   the interval to check EOF
+        """
+        flogger.info(f"start EventSockParser for {filename}")
+        try:
+            os.unlink(filename)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            flogger.warning(f"unlink {filename} error: {e}")
+
+        import queue
+        import socketserver
+        from http.server import BaseHTTPRequestHandler
+
+        body_queue: queue.Queue[bytes] = queue.Queue(maxsize=1024)
+
+        class myHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"Pong!\n")
+                # TODO: internal status analysis
+
+            def do_POST(self):
+                try:
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = self.rfile.read(length)
+                    try:
+                        body_queue.put(body, timeout=1.0)
+                    except queue.Full:
+                        flogger.warning("body_queue full, drop msg")
+                    # set response, note that client(in monitor sdk) need't this resp
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/html")
+                    self.end_headers()
+                    self.wfile.write(b"OK\n")
+                except Exception as e:
+                    flogger.error(f"POST handler error: {e}")
+                    self.send_response(500)
+                    self.end_headers()
+
+        class UnixSocketHttpServer(socketserver.UnixStreamServer):
+            def get_request(self):
+                request, client_address = super().get_request()
+                return (request, ["local", 0])
+
+        def run_server():
+            try:
+                server = UnixSocketHttpServer(filename, myHandler)
+                flogger.info(f"Unix socket server start on {filename}")
+                server.serve_forever()
+            except Exception as e:
+                flogger.error(f"Socket server error: {e}")
+            finally:
+                flogger.info(f"Unix socket server finish on {filename}")
+
+        def get_metric_record_logger():
+            # This logger is used to dump metric record
+            # since sock msg cannot directly store as log msg
+            dump_logger = logging.getLogger(f"{__name__}-dump")
+            dump_logger.propagate = False
+            dump_logger.setLevel(logging.INFO)
+            logfile_path = os.path.join(
+                os.environ.get("STD_LOG_DIR", "./log/"), "recis_sock_metric.log"
+            )
+            log_handler: logging.FileHandler = RotatingFileHandler(
+                filename=logfile_path, maxBytes=100 * 1024 * 1024, backupCount=3
+            )
+            log_handler.setFormatter(logging.Formatter("%(message)s"))
+            dump_logger.addHandler(log_handler)
+            return dump_logger
+
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+        metric_logger = get_metric_record_logger()
+
+        while True:
+            try:
+                body = await asyncio.to_thread(body_queue.get, timeout=0.5)
+            except queue.Empty:
+                flogger.info(f"wait filename EOF: {filename} , retry in 2s")
+                await asyncio.sleep(2)
+                continue
+            except Exception as e:
+                flogger.error(f"SockParser body_queue get error: {e}")
+                continue
+
+            try:
+                resp = body.decode(errors="ignore")
+                metric_logger.info(resp)
+                lines = resp.strip().split("\n")
+                parser_global_tags = {}
+                for line in lines:
+                    line = str(line).strip()
+                    if len(line) <= 1:  # empty line
+                        continue
+                    if line.startswith("#"):
+                        parser_global_tags = EventActor._parse_line_group(
+                            line, parser_global_tags
+                        )
+                        continue
+                    event = EventActor._parse_line_event(line, parser_global_tags)
+                    if event is None:
+                        continue
+                    if event.lag_ms() > 10 * 60 * 1000:
+                        flogger.debug(
+                            f"event {event.name} lag_ms:{event.lag_ms()} too old, skip"
+                        )
+                        continue
+                    await output_queue.put(event)
+            except Exception:
+                flogger.exception("Handle body error")
+        # flogger.debug(f"finish EventSockParser for {filename}")
+
+    @staticmethod
     def EventDispatcher(queue: asyncio.Queue[Event], interval: int = 2):
         r"""
         Event Queue Consumer. All evnets are send by this dispatcher.
         """
-        from recis.info import is_internal_enabled
+        try:
+            from recis.info import is_internal_enabled
+        except Exception:
+            # When recis not exist, it MUST NOT be Opensource.
+            #   So in internal_version, launch daemon is always necessary
+            #   Hope we can get `is_recis` flag from env or somewhere
+            def is_internal_enabled():
+                return True
 
         submitter = EventSubmitter.GetSubmitter(is_internal=is_internal_enabled())
         last_snapshot_: float = time.time()
@@ -748,6 +892,14 @@ class DaemonProcess:
                     )
                 )
                 parser_tasks.append(task)
+            # launch a single unix domain socket parser.
+            read_sockname = os.environ.get("STD_LOG_DIR", "./log/")
+            read_sockname = os.path.join(read_sockname, "recis_metric.sock")
+            parser_tasks.append(
+                asyncio.create_task(
+                    EventActor.EventSockParser(read_sockname, cls.event_queue)
+                )
+            )
             try:
                 while cls.running_:
                     await asyncio.sleep(cls.interval)
