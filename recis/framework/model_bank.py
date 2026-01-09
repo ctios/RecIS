@@ -183,18 +183,21 @@ class MBC:
 def maybe_get_latest_version(path, force_sub_version=False):
     ckpt_id = None
     fs = get_file_system(path)
-    if fs.isdir(path):
-        if fs.exists(os.path.join(path, "checkpoint")):
-            content = fs.open(os.path.join(path, "checkpoint"), "r").read()
-            versions = content.split("\n")[::-1]
-            for version in versions:
-                if len(version) == 0:
-                    continue
-                ckpt_id = version.strip()
-                break
-        logger.warning(f"Get latest checkpoint version {ckpt_id} from path {path}.")
+    if fs.exists(path):
+        if fs.isdir(path):
+            if fs.exists(os.path.join(path, "checkpoint")):
+                content = fs.open(os.path.join(path, "checkpoint"), "r").read()
+                versions = content.split("\n")[::-1]
+                for version in versions:
+                    if len(version) == 0:
+                        continue
+                    ckpt_id = version.strip()
+                    break
+            logger.warning(f"Get latest checkpoint version {ckpt_id} from path {path}.")
+        else:
+            logger.warning(f"Checkpoint not found in path: {path}")
     else:
-        logger.warning(f"Checkpoint not found in path: {path}")
+        logger.warning(f"{path} not exists")
     if ckpt_id is not None:
         real_path = os.path.join(path, ckpt_id)
     else:
