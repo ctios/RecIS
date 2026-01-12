@@ -8,6 +8,7 @@ import recis  # load recis shared lib, but not call directly
 
 class PointType:
     kGauge = 100
+    kGaugeSticky = 110
     kCounter = 200
     kSummary = 300
     # kHistogram = 400

@@ -17,15 +17,18 @@ class _InitialProfilerHook(Hook):
     the runtime of `_InitialProfilerHook` is earlier than that of `ProfilerHook`,
     and the two do not overlap. Therefore, the `wait` period of `ProfilerHook` is longer than
     the runtime of `_InitialProfilerHook`.
+
+    StepDuration is the midpoint step between _InitialProfilerHook and ProfilerHook.
+    the start-up steps are dropped, due to the noise of prof events. so wait step cannot be too short.
     """
 
-    StepDuration = 2
+    StepDuration = 5
 
     def __init__(self, scheduler=None):
         self.logger = Logger("_InitialProfilerHook")
         self.enable = True if os.environ.get("RECIS_MONITOR_ON", "1") == "1" else False
         # make sure the finish step in model.train, is less than StepDuration
-        self.wait = 2
+        self.wait = 4
         self.warmup = 0
         self.active = 1
         self.repeat = 1
@@ -40,6 +43,10 @@ class _InitialProfilerHook(Hook):
                 repeat=self.repeat,
                 skip_first=self.skip_first,
             )
+        self.prof_step_count = 0
+        self.prof = None
+        if not self.enable:
+            return
         self.prof = profile(
             activities=[
                 ProfilerActivity.CPU,
@@ -54,7 +61,6 @@ class _InitialProfilerHook(Hook):
         )
         self.prof.__enter__()
         self.prof.step()
-        self.prof_step_count = 0
 
     def before_step(self, is_train=True, *args, **kwargs):
         if not self.enable:

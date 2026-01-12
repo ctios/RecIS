@@ -69,27 +69,44 @@ class MetricReportHook(Hook):
         # hashtable
         for ht_name, ht in self.hashtables.items():
             act_num, total_num = ht.id_info()
-            MetricReporter.report(HT_ID_ACT_SIZE, act_num, {"recis_ht_name": ht_name})
             MetricReporter.report(
-                HT_ID_TOTAL_SIZE, total_num, {"recis_ht_name": ht_name}
+                HT_ID_ACT_SIZE, act_num, {"recis_ht_name": ht_name}, type="gauge_sticky"
+            )
+            MetricReporter.report(
+                HT_ID_TOTAL_SIZE,
+                total_num,
+                {"recis_ht_name": ht_name},
+                type="gauge_sticky",
             )
             allocator_act_num, allocator_total_num = ht.allocator_id_info()
             MetricReporter.report(
-                HT_ALLOCATOR_ID_ACT_SIZE, allocator_act_num, {"recis_ht_name": ht_name}
+                HT_ALLOCATOR_ID_ACT_SIZE,
+                allocator_act_num,
+                {"recis_ht_name": ht_name},
+                type="gauge_sticky",
             )
             MetricReporter.report(
                 HT_ALLOCATOR_ID_TOTAL_SIZE,
                 allocator_total_num,
                 {"recis_ht_name": ht_name},
+                type="gauge_sticky",
             )
             total_mem = ht.id_memory_info()
             MetricReporter.report(
-                HT_ID_TOTAL_BYTES, total_mem, {"recis_ht_name": ht_name}
+                HT_ID_TOTAL_BYTES,
+                total_mem,
+                {"recis_ht_name": ht_name},
+                type="gauge_sticky",
             )
             emb_mem, total_mem = ht.emb_memory_info()
-            MetricReporter.report(HT_EMB_BYTES, emb_mem, {"recis_ht_name": ht_name})
             MetricReporter.report(
-                HT_ALL_SLOT_BYTES, total_mem, {"recis_ht_name": ht_name}
+                HT_EMB_BYTES, emb_mem, {"recis_ht_name": ht_name}, type="gauge_sticky"
+            )
+            MetricReporter.report(
+                HT_ALL_SLOT_BYTES,
+                total_mem,
+                {"recis_ht_name": ht_name},
+                type="gauge_sticky",
             )
 
     def before_step(self, is_train=True, *args, **kwargs):

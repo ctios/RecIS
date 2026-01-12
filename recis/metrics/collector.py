@@ -53,6 +53,7 @@ def SetupLogger():
 class Event:
     class PointType:
         kGauge: int = 100
+        kGaugeSticky: int = 110  # NOTE: sticky only accumulate in sdk, not in collector
         kCounter: int = 200
         kSummary: int = 300
 
@@ -178,6 +179,8 @@ class InternalEventSubmitter(EventSubmitter):
         from kmonitor.kmonitor import MetricTypes
 
         if type == Event.PointType.kGauge:
+            return MetricTypes.GAUGE_METRIC
+        elif type == Event.PointType.kGaugeSticky:
             return MetricTypes.GAUGE_METRIC
         elif type == Event.PointType.kCounter:
             return MetricTypes.COUNTER_METRIC

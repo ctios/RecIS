@@ -36,7 +36,7 @@ namespace chrono = std::chrono;
 class Factory;
 class Client;
 class PointTag;
-enum PointType;  // Option: kGauge, kCounter, kSummary
+enum PointType;  // Option: kGauge, kGaugeSticky, kCounter, kSummary
 class RecisMonitorWriter;
 
 /**

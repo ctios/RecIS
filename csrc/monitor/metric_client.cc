@@ -106,6 +106,7 @@ unique_ptr<Estimator> Estimator::NewEstimator(PointType pType) {
   unique_ptr<Estimator> estimator_p_;
   switch (pType) {
     case PointType::kGauge:
+    case PointType::kGaugeSticky:
     case PointType::kCounter: {
       estimator_p_ = unique_ptr<Estimator>(new TrivialEstimator());
       break;
@@ -375,18 +376,21 @@ bool Client::report(const string& name, double value,
 
   switch (pType) {
     case PointType::kGauge:
-    case PointType::kCounter:
+    case PointType::kGaugeSticky:
+    case PointType::kCounter: {
       estimator.observe(value);
       break;
-    case PointType::kSummary:  // 为了灵活切换metric后端、避免耦合,
-                               // 本处仅实现单机Summary方案,
-                               // 不考虑分布式分位数的聚合问题
+    }
+    // 为了灵活切换metric后端、避免耦合,本处仅实现单机Summary方案,不考虑分布式分位数的聚合问题
+    case PointType::kSummary: {
       estimator.observe(static_cast<double>(value));
       break;
-    default:
+    }
+    default: {
       throw std::runtime_error("Metric Client unsupported PointType:" +
                                std::to_string(pType));
       break;
+    }
   }
   return true;
 }
@@ -414,6 +418,8 @@ string Client::take_snapshot() {
   auto func_get_type_name = [](PointType pType) -> const char* {
     switch (pType) {
       case PointType::kGauge:
+      case PointType::kGaugeSticky:
+        // 驻留型和非驻留型点的记录时有区别但上报类型都是gauge, 无需区分
         return "gauge";
       case PointType::kCounter:
         return "count";
@@ -444,7 +450,8 @@ string Client::take_snapshot() {
     }
     oss << '\t';
     switch (estimator.pType) {
-      case PointType::kGauge: {
+      case PointType::kGauge:
+      case PointType::kGaugeSticky: {
         double val = estimator.last();     // Original Value of PointType
         uint64_t num = estimator.count();  // Original Point Number of PointType
         double sum = estimator.sum();
@@ -454,7 +461,9 @@ string Client::take_snapshot() {
         oss << "val=" << val << ',' << "num=" << num << ',' << "sum=" << sum
             << ',' << "avg=" << avg << ',' << "max=" << max << ','
             << "min=" << min;
-        estimator.reset();
+        if (estimator.pType == PointType::kGauge) {
+          estimator.reset();
+        }
         break;
       }
       case PointType::kCounter: {

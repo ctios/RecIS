@@ -24,7 +24,7 @@ extern "C" {
 #include <time.h>
 #include <unistd.h>
 
-#define RECIS_MONITOR_LOG_WRITER_BUF_MAX 16384  // 缓冲区最大字节数
+#define RECIS_MONITOR_LOG_WRITER_BUF_MAX 32768  // 缓冲区最大字节数
 #define RECIS_MONITOR_LOG_KEEP_NUM 10  // 最多保留多少个轮转文件
 
 typedef enum {

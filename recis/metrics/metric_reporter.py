@@ -12,6 +12,7 @@ from recis.utils.logger import Logger
 
 TAG_MAP = {
     "gauge": PointType.kGauge,
+    "gauge_sticky": PointType.kGaugeSticky,
     "counter": PointType.kCounter,
     "summary": PointType.kSummary,
 }

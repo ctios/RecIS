@@ -23,9 +23,10 @@ class CKMSEstimator;
 class BucketizeEstimator;
 
 enum PointType {
-  kGauge = 100LL,    // 取周期内最后一个值
-  kCounter = 200LL,  // 取本client启动后, Tag序列下的累计值
-  kSummary = 300LL,  // 取周期内sum/avg/max/p99. kmonitor
+  kGauge = 100LL,        // 取周期内最后一个值
+  kGaugeSticky = 110LL,  // 取周期内外最后一个值, 不自动清理
+  kCounter = 200LL,      // 取本client启动后, Tag序列下的累计值
+  kSummary = 300LL,      // 取周期内sum/avg/max/p99. kmonitor
                      // sdk中的Summary含义等同于Histogram, 因故合并
   // kHistogram = 400LL,    // 取周期内sum/avg/max/p99
   // kHistogramFull = 410LL,  // 取周期内sum/avg/max/min/p01/p10/p50/p90/p99
