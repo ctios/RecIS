@@ -439,6 +439,30 @@ class DynamicEmbedding(torch.nn.Module):
             )
         return val, offsets, weight, shape
 
+    def insert(self, input_ids, input_emb):
+        """Insert embeddings for specific IDs, Embs to hashtable."""
+        bs = input_ids.shape[0]
+        input_ids = input_ids.reshape(bs, -1)
+        input_emb = input_emb.reshape(bs, -1)
+
+        ids, offsets, _, _ = self.deal_with_tensor(input_ids)
+        # exchange ids
+        ids_exchange_result: ExchangeIDsResults = self.exchange_ids(ids, offsets)
+        ids_exchange_result.ids_await.wait()
+
+        _, unique_to_sorted = torch.sort(ids_exchange_result.reverse_index)
+        input_emb = input_emb[unique_to_sorted]
+
+        output_embs, emb_await, _ = EmbeddingExchange.apply(
+            input_emb,
+            ids_exchange_result.parts,
+            ids_exchange_result.parts_reverse,
+            self._pg,
+        )
+        emb_await.wait()
+        output_embs = output_embs.reshape(-1, self._emb_opt.embedding_dim)
+        self._hashtable.insert(ids_exchange_result.ids, output_embs)
+
     def forward(
         self,
         input_ids: Union[torch.Tensor, RaggedTensor],
