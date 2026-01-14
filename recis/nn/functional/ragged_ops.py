@@ -263,7 +263,7 @@ def _fused_ragged_cutoff_3D(
         >>> # Sequence 2 (len 2 == 2): no change -> [ [], [18, 19] ]
         >>> # Original 3D empty ragged tensor 'b'
         >>> values = torch.tensor([], dtype=torch.float64)
-        >>> outer_offsets = torch.tensor([0, 0, 0, 0, 0, 0], dtype=torch.int32)
+        >>> outer_offsets = torch.tensor([0], dtype=torch.int32)
         >>> inner_offsets = torch.tensor([0], dtype=torch.int32)
         >>> new_values, new_outer, new_inner = _fused_ragged_cutoff_3D(
         ...     [values],
@@ -274,13 +274,38 @@ def _fused_ragged_cutoff_3D(
         ...     pad_sides,
         ... )
         >>> # Expected error:
-        >>> # fused_ragged_cutoff_3D: 0th input ragged tensor can not have 0 seqs either 0 rows
+        >>> # fused_ragged_cutoff_3D: 0th input ragged tensor can not have 0 seqs
+        >>>
         >>>
         >>> # Original 3D empty ragged tensor 'c' but with at least 1 row
         >>> # [
-        >>> #     [ [], [], [], [], [] ],               # Sequence 0, len 1
-        >>> #     [ [], ],           # Sequence 1, len 2
-        >>> #     [ [], [], [], [] ],           # Sequence 2, len 2
+        >>> #     [null],           # Sequence 0
+        >>> #     [null],           # Sequence 1
+        >>> #     [null],           # Sequence 2
+        >>> # ]
+        >>> values = torch.tensor([], dtype=torch.float64)
+        >>> outer_offsets = torch.tensor([0, 0, 0, 0], dtype=torch.int32)
+        >>> inner_offsets = torch.tensor([0], dtype=torch.int32)
+        >>> new_values, new_outer, new_inner = _fused_ragged_cutoff_3D(
+        ...     [values],
+        ...     [outer_offsets],
+        ...     [inner_offsets],
+        ...     torch.tensor([3], dtype=torch.int32),
+        ...     drop_sides,
+        ...     pad_sides,
+        ... )
+        >>> # Expected results
+        >>> # Sequence 0: [[], [], []]
+        >>> # Sequence 1: [[], [], []]
+        >>> # Sequence 2: [[], [], []]
+        >>> # new_values: [tensor([], device='cuda:0', dtype=torch.float64)]
+        >>> # new_outer: [tensor([0, 3, 6, 9], device='cuda:0', dtype=torch.int32)]
+        >>> # new_inner: [tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], device='cuda:0', dtype=torch.int32)]
+        >>> # Original 3D empty ragged tensor 'c' but with at least 1 row
+        >>> # [
+        >>> #     [ [], [], [], [], [] ],
+        >>> #     [ [], ],
+        >>> #     [ [], [], [], [] ],
         >>> # ]
         >>> values = torch.tensor([], dtype=torch.float64)
         >>> outer_offsets = torch.tensor([0, 5, 6, 10], dtype=torch.int32)

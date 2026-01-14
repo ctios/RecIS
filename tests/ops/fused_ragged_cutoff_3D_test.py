@@ -65,6 +65,18 @@ class TestFusedCutOffConsistency(unittest.TestCase):
         self.pad_sides = {}
 
         for i in range(10):
+            offsets = []
+            offsets.append(torch.zeros(random.randint(2, 100), dtype=torch.int32))
+            offsets.append(torch.tensor([0], dtype=torch.int32))
+            val = torch.tensor([], dtype=torch.float64)
+            self.fused_vals[torch.float64].append(val.cuda())
+            self.fused_offsets[torch.float64].append(offsets[0].cuda())
+            self.fused_inner_offsets[torch.float64].append(offsets[1].cuda())
+            self.keep_lengths_list[torch.float64].append(i + 3)
+            self.drop_sides_list[torch.float64].append(False)
+            self.pad_sides_list[torch.float64].append(False)
+
+        for i in range(10):
             val, offsets, max_lens = gen_ragged_tensor(
                 bs=3,
                 min_seq=1,
@@ -146,7 +158,7 @@ class TestFusedCutOffConsistency(unittest.TestCase):
                 max_seq=70,
                 max_n=10,
                 min_n=1,
-                dtype=torch.float64,
+                dtype=torch.int64,
             )
             self.fused_vals[torch.int64].append(val.cuda())
             self.fused_offsets[torch.int64].append(offsets[0].cuda())
@@ -180,7 +192,6 @@ class TestFusedCutOffConsistency(unittest.TestCase):
                 drop_sides_list = self.drop_sides_list[dt]
                 pad_sides_list = self.pad_sides_list[dt]
                 keep_lengths = self.keep_lengths[dt]
-
                 res = []
                 for idx, (val, offset, inner_offsets, keep_len, drop, pad) in enumerate(
                     zip(
@@ -202,7 +213,6 @@ class TestFusedCutOffConsistency(unittest.TestCase):
                     )
                     res.append((tmp[0][0], tmp[1][0], tmp[2][0]))
                     torch.cuda.synchronize()
-
                 fuse_res_tuple = _fused_ragged_cutoff_3D(
                     fused_vals, fused_offsets, fused_inner_offsets, keep_lengths
                 )

@@ -192,6 +192,8 @@ fused_ragged_cutoff_3D(std::vector<at::Tensor> values,
               "torch::kBool");
 
   int fea_num = values.size();
+  TORCH_CHECK(torch::all(keep_lengths > 0).item<bool>(),
+              "fused_ragged_cutoff_3D: keep_lengths should be > 0");
   TORCH_CHECK(keep_lengths.numel() == fea_num,
               "keep_lengths.numel() = ", keep_lengths.numel(),
               " but is expected equals fea_num =", fea_num);
@@ -202,9 +204,8 @@ fused_ragged_cutoff_3D(std::vector<at::Tensor> values,
               "outer_offsets.numel() = ", outer_offsets.size(),
               " but is expected equals fea_num =", fea_num);
   for (int i = 0; i < inner_offsets.size(); ++i) {
-    TORCH_CHECK(inner_offsets[i].numel() > 1 && outer_offsets[i].numel() > 1,
-                "fused_ragged_cutoff_3D: ", i,
-                "th input ragged tensor can not have 0 seqs either 0 rows");
+    TORCH_CHECK(outer_offsets[i].numel() > 1, "fused_ragged_cutoff_3D: ", i,
+                "th input ragged tensor can not have 0 seqs");
   }
 
   auto stream = c10::cuda::getCurrentCUDAStream();
