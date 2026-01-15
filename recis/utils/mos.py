@@ -17,11 +17,14 @@ if not os.environ.get("BUILD_DOCUMENT", None) == "1":
 logger = Logger(__name__)
 
 
-def format_physical_path(path):
+def format_physical_path(path: str):
+    prefix = ""
+    local_path = path
     if path.startswith("xpfs://"):
         # "xpfs://xxx/data/.../" -> "/data/.../"
-        path = "/" + path[7:].split("/", 1)[1]
-    return path
+        index = path.find("/data/")
+        prefix, local_path = path[:index], path[index:]
+    return prefix, local_path
 
 
 def parse_uri(uri, auto_version=False):
@@ -263,7 +266,9 @@ class Mos:
             )
         else:
             self.real_physical_path = render_uri_to_output_dir(uri)
-        self.real_physical_path = format_physical_path(self.real_physical_path)
+        self.storage_prefix, self.real_physical_path = format_physical_path(
+            self.real_physical_path
+        )
 
     def ckpt_update(
         self,
@@ -303,6 +308,7 @@ class Mos:
             - Logs checkpoint deletion operations as warnings
             - Uses the version_uri for checkpoint operations
         """
+        path = self.storage_prefix + path
         ckpt_labels = []
         if label_key is not None and label_value is not None:
             assert isinstance(label_key, str) and isinstance(label_value, str)
