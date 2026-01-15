@@ -352,6 +352,12 @@ def make_odps_window_io(split_num=None, row_num=None):
         _read_offset = torch.LongTensor([0])
         _shard_sheets = []
 
+        def __init__(self, *args, **kwargs):
+            # for window io, save_interval should be None,
+            # because read offset is saved after each window.
+            kwargs["save_interval"] = None
+            super().__init__(*args, **kwargs)
+
         def add_path(self, odps_table, proportion: tuple = (1, 1)):
             """Add an ODPS table path with proportional configuration.
 
