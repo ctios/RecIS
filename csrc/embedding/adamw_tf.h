@@ -37,7 +37,6 @@ struct TORCH_API SparseAdamWTFParamState
   using ParamContainer = at::intrusive_ptr<embedding::Slot>;
   torch::Dtype step_dtype() const { return step_dtype_; }
   torch::Dtype beta_dtype() const { return beta_dtype_; }
-
   const ParamContainer param() const { return param_; }
   void param(const ParamContainer param) { param_ = param; }
   const ParamContainer exp_avg() const { return exp_avg_; }
@@ -101,19 +100,11 @@ class SparseAdamWTF : public SparseOptimizer {
       const torch::Dict<std::string, HashTablePtr> &parameters) override;
   void InitParamState(const std::string &param_name, HashTablePtr param);
   void step() override;
-  void zero_grad();
-  void set_grad_accum_steps(const int64_t steps) override {
-    grad_accum_steps_ = steps;
-  }
-  void set_lr(const double lr) override {
-    for (auto &group : param_groups_) {
-      group.options().set_lr(lr);
-    }
-  }
   static c10::intrusive_ptr<SparseAdamWTF> Make(
       const torch::Dict<std::string, HashTablePtr> &hashtables, double lr,
       double beta1, double beta2, double eps, double weight_decay,
       bool use_nesterov);
+  void reset_state_dict();
 };
 }  // namespace optim
 }  // namespace recis

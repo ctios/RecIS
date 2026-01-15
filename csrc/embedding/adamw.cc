@@ -39,6 +39,7 @@
 #include "embedding/hashtable.h"
 #include "embedding/initializer.h"
 #include "embedding/optim.h"
+#include "embedding/optim_util.h"
 #include "embedding/parallel_util.h"
 #include "ops/block_apply_adamw_op.h"
 #include "torch/types.h"
@@ -46,9 +47,6 @@
 namespace recis {
 namespace optim {
 namespace {
-at::SparseTensorImpl *get_sparse_impl(const at::Tensor &self) {
-  return static_cast<at::SparseTensorImpl *>(self.unsafeGetTensorImpl());
-}
 
 void FusedSparseAdamW(torch::Tensor grad, SparseAdamWOptions &options,
                       SparseAdamWParamState &state) {
@@ -64,8 +62,8 @@ void FusedSparseAdamW(torch::Tensor grad, SparseAdamWOptions &options,
   auto weight_decay = 1 - options.lr() * options.weight_decay();
   auto eps = options.eps();
 
-  auto index = get_sparse_impl(grad)->indices();
-  auto grad_emb = get_sparse_impl(grad)->values();
+  auto index = utils::get_sparse_impl(grad)->indices();
+  auto grad_emb = utils::get_sparse_impl(grad)->values();
 
   recis::functional::block_apply_adamw(
       index, grad_emb, (*param->Values()), state.beta1(), state.beta2(),
@@ -99,54 +97,24 @@ double SparseAdamWOptions::get_lr() const { return lr_; }
 void SparseAdamWOptions::set_lr(const double lr) { lr_ = lr; }
 
 void SparseAdamW::step() {
-  torch::NoGradGuard no_grad;
-  std::unordered_map<std::string, std::pair<HashTablePtr, torch::Tensor>>
-      var_grads;
-  for (auto &group : param_groups_) {
-    for (auto &it : group.params()) {
-      auto &p = it.second;
-      if (!p.defined()) {
-        continue;
-      }
-      if (!p->HasGrad()) {
-        continue;
-      }
-      const auto &grad = p->Grad(grad_accum_steps_);
-      if (!grad.defined()) {
-        continue;
-      }
-      TORCH_CHECK(grad.is_sparse(), "SparseAdamW only support sparse gradients" /*, please consider SparseAdamW instead*/);
-      var_grads[it.first] = std::make_pair(p, grad);
-    }
-  }
-  for (auto &group : param_groups_) {
-    for (auto &it : group.params()) {
-      auto var_grad = var_grads.find(it.first);
-      if (var_grad == var_grads.end()) {
-        continue;
-      }
-      auto &options = static_cast<SparseAdamWOptions &>(group.options());
-      auto &state = static_cast<SparseAdamWParamState &>(
-          *state_[var_grad->second.first.get()]);
-      int64_t param_size = state.param()->Values()->size();
-      TORCH_CHECK(
-          param_size == state.exp_avg()->Values()->size() &&
-              param_size == state.exp_avg_sq()->Values()->size(),
-          "param size and adamw param size mismatch",
-          ", param_size: ", param_size,
-          ", adamw exp_avg size: ", state.exp_avg()->Values()->size(),
-          ", adamw exp_avg_sq size: ", state.exp_avg_sq()->Values()->size());
-      {
+  utils::apply_sparse_step<SparseAdamWOptions, SparseAdamWParamState>(
+      param_groups_, state_, grad_accum_steps_,
+      [&](const std::string &name, HashTablePtr &p, const torch::Tensor &grad,
+          SparseAdamWOptions &options, SparseAdamWParamState &state) {
+        int64_t param_size = state.param()->Values()->size();
+        TORCH_CHECK(
+            param_size == state.exp_avg()->Values()->size() &&
+                param_size == state.exp_avg_sq()->Values()->size(),
+            "param size and adamw param size mismatch",
+            ", param_size: ", param_size,
+            ", adamw exp_avg size: ", state.exp_avg()->Values()->size(),
+            ", adamw exp_avg_sq size: ", state.exp_avg_sq()->Values()->size());
         RECORD_FUNCTION(
-            torch::str("FusedSparseAdamW", "/", it.first, "/", "Update"),
+            torch::str("FusedSparseAdamW", "/", name, "/", "Update"),
             std::vector<c10::IValue>());
-        FusedSparseAdamW(var_grad->second.second, options, state);
-      }
-    }
-  }
+        FusedSparseAdamW(grad, options, state);
+      });
 }
-
-void SparseAdamW::zero_grad() { SparseOptimizer::zero_grad(); }
 
 void SparseAdamW::add_param_group(
     const SparseOptimizerParamGroup &param_group) {
@@ -243,5 +211,8 @@ c10::intrusive_ptr<SparseAdamW> SparseAdamW::Make(
   }
   return c10::make_intrusive<SparseAdamW>(input, option);
 }
+
+void SparseAdamW::reset_state_dict() {}
+
 }  // namespace optim
 }  // namespace recis

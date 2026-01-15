@@ -125,7 +125,7 @@ class SparseOptimizer(Optimizer):
 
         # Only clear gradients when accumulation steps are reached
         if self._local_step % self._grad_accum_steps == 0:
-            self._imp.zero_grad()
+            self._imp.zero_grad(None)
 
     def state_dict(self) -> dict:
         """Return the optimizer state as a dictionary.
@@ -172,3 +172,11 @@ class SparseOptimizer(Optimizer):
         """
         self._grad_accum_steps = steps
         self._imp.set_grad_accum_steps(steps)
+
+    def reset_state_dict(self):
+        """reset optimizer state from a dictionary.
+
+        This method reset the optimizer state of itself, mainly
+        for the tests of loading state of sparse optimizer
+        """
+        self._imp.reset_state_dict()

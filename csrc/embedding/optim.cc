@@ -139,6 +139,16 @@ const std::vector<SparseOptimizerParamGroup> &SparseOptimizer::param_groups()
   return param_groups_;
 }
 
+void SparseOptimizer::set_grad_accum_steps(const int64_t steps) noexcept {
+  grad_accum_steps_ = steps;
+}
+
+void SparseOptimizer::set_lr(const double lr) noexcept {
+  for (auto &group : param_groups_) {
+    group.options().set_lr(lr);
+  }
+}
+
 ska::flat_hash_map<void *, std::unique_ptr<SparseOptimizerParamState>> &
 SparseOptimizer::state() noexcept {
   return state_;

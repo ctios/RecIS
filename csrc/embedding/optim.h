@@ -123,7 +123,7 @@ class SparseOptimizer : public torch::CustomClassHolder {
       const torch::Dict<std::string, HashTablePtr> &parameters);
 
   /// Zeros out the gradients of all parameters.
-  virtual void zero_grad(bool set_to_none = true);
+  void zero_grad(bool set_to_none = true);
 
   /// Provides a const reference to the parameters in the first param_group this
   /// optimizer holds.
@@ -147,9 +147,11 @@ class SparseOptimizer : public torch::CustomClassHolder {
   /// Provides a const reference to the param_groups this optimizer holds.
   const std::vector<SparseOptimizerParamGroup> &param_groups() const noexcept;
 
-  virtual void set_grad_accum_steps(const int64_t steps) = 0;
+  /// Set gradient accum steps of this optimizer
+  void set_grad_accum_steps(const int64_t steps) noexcept;
 
-  virtual void set_lr(const double lr) = 0;
+  /// Set learning rate of this optimizer
+  void set_lr(const double lr) noexcept;
 
   /// Provides a reference to the state this optimizer holds
   ska::flat_hash_map<void *, std::unique_ptr<SparseOptimizerParamState>> &

@@ -100,19 +100,11 @@ class SparseAdamW : public SparseOptimizer {
       const torch::Dict<std::string, HashTablePtr> &parameters) override;
   void InitParamState(const std::string &param_name, HashTablePtr param);
   void step() override;
-  void zero_grad();
-  void set_grad_accum_steps(const int64_t steps) override {
-    grad_accum_steps_ = steps;
-  }
-  void set_lr(const double lr) override {
-    for (auto &group : param_groups_) {
-      group.options().set_lr(lr);
-    }
-  }
   static c10::intrusive_ptr<SparseAdamW> Make(
       const torch::Dict<std::string, HashTablePtr> &hashtables, double lr,
       double beta1, double beta2, double eps, double weight_decay,
       bool use_nesterov);
+  void reset_state_dict();
 };
 }  // namespace optim
 }  // namespace recis

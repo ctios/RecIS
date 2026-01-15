@@ -41,6 +41,7 @@
 #include "embedding/hashtable.h"
 #include "embedding/initializer.h"
 #include "embedding/optim.h"
+#include "embedding/optim_util.h"
 #include "embedding/parallel_util.h"
 #include "ops/block_apply_adamw_op.h"
 #include "torch/types.h"
@@ -48,9 +49,6 @@
 namespace recis {
 namespace optim {
 namespace {
-at::SparseTensorImpl *get_sparse_impl(const at::Tensor &self) {
-  return static_cast<at::SparseTensorImpl *>(self.unsafeGetTensorImpl());
-}
 
 void FusedSparseAdam(torch::Tensor grad, SparseAdamOptions &options,
                      SparseAdamParamState &state) {
@@ -64,8 +62,8 @@ void FusedSparseAdam(torch::Tensor grad, SparseAdamOptions &options,
   auto beta2 = std::get<1>(options.betas());
 
   auto eps = options.eps();
-  auto index = get_sparse_impl(grad)->indices();
-  auto grad_emb = get_sparse_impl(grad)->values();
+  auto index = utils::get_sparse_impl(grad)->indices();
+  auto grad_emb = utils::get_sparse_impl(grad)->values();
 
   recis::functional::block_apply_adamw(
       index, grad_emb, (*param->Values()), state.beta1(), state.beta2(),
@@ -99,42 +97,23 @@ double SparseAdamOptions::get_lr() const { return lr_; }
 void SparseAdamOptions::set_lr(const double lr) { lr_ = lr; }
 
 void SparseAdam::step() {
-  torch::NoGradGuard no_grad;
-  for (auto &group : param_groups_) {
-    for (auto &it : group.params()) {
-      auto &p = it.second;
-      if (!p.defined()) {
-        continue;
-      }
-      if (!p->HasGrad()) {
-        continue;
-      }
-      const auto &grad = p->Grad(grad_accum_steps_);
-      if (!grad.defined()) {
-        continue;
-      }
-      TORCH_CHECK(grad.is_sparse(), "SparseAdam only support sparse gradients" /*, please consider SparseAdam instead*/);
-      auto &options = static_cast<SparseAdamOptions &>(group.options());
-      auto &state = static_cast<SparseAdamParamState &>(*state_[p.get()]);
-      int64_t param_size = state.param()->Values()->size();
-      TORCH_CHECK(
-          param_size == state.exp_avg()->Values()->size() &&
-              param_size == state.exp_avg_sq()->Values()->size(),
-          "param size and adamw param size mismatch",
-          ", param_size: ", param_size,
-          ", adamw exp_avg size: ", state.exp_avg()->Values()->size(),
-          ", adamw exp_avg_sq size: ", state.exp_avg_sq()->Values()->size());
-      {
-        RECORD_FUNCTION(
-            torch::str("FusedSparseAdam", "/", it.first, "/", "Update"),
-            std::vector<c10::IValue>());
+  utils::apply_sparse_step<SparseAdamOptions, SparseAdamParamState>(
+      param_groups_, state_, grad_accum_steps_,
+      [&](const std::string &name, HashTablePtr &p, const torch::Tensor &grad,
+          SparseAdamOptions &options, SparseAdamParamState &state) {
+        int64_t param_size = state.param()->Values()->size();
+        TORCH_CHECK(
+            param_size == state.exp_avg()->Values()->size() &&
+                param_size == state.exp_avg_sq()->Values()->size(),
+            "param size and adamw param size mismatch",
+            ", param_size: ", param_size,
+            ", adamw exp_avg size: ", state.exp_avg()->Values()->size(),
+            ", adamw exp_avg_sq size: ", state.exp_avg_sq()->Values()->size());
+        RECORD_FUNCTION(torch::str("FusedSparseAdam", "/", name, "/", "Update"),
+                        std::vector<c10::IValue>());
         FusedSparseAdam(grad, options, state);
-      }
-    }
-  }
+      });
 }
-
-void SparseAdam::zero_grad() { SparseOptimizer::zero_grad(); }
 
 void SparseAdam::add_param_group(const SparseOptimizerParamGroup &param_group) {
   SparseOptimizerParamGroup param_group_(param_group.params());
@@ -227,5 +206,8 @@ c10::intrusive_ptr<SparseAdam> SparseAdam::Make(
   }
   return c10::make_intrusive<SparseAdam>(input, option);
 }
+
+void SparseAdam::reset_state_dict() {}
+
 }  // namespace optim
 }  // namespace recis

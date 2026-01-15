@@ -6,6 +6,7 @@
 #include "ATen/core/TensorBody.h"
 #include "data/local_data_resource.h"
 #include "data/sampler_ops.h"
+#include "embedding/adagrad.h"
 #include "embedding/adam.h"
 #include "embedding/adamw.h"
 #include "embedding/adamw_tf.h"
@@ -150,37 +151,82 @@ TORCH_LIBRARY(recis, m) {
       .def_readonly("hashtable_tag", &Hashtable::kNullIndex);
 
   // optimzier
+  m.class_<recis::optim::SparseOptimizer>("SparseOptimizer");
+
+  m.class_<recis::optim::SparseAdagrad>("SparseAdagrad")
+      .def("step", &recis::optim::SparseAdagrad::step)
+      .def("add_parameters", &recis::optim::SparseAdagrad::add_parameters)
+      .def("state_dict", &recis::optim::SparseAdagrad::state_dict)
+      .def("load_state_dict", &recis::optim::SparseAdagrad::load_state_dict)
+      .def("reset_state_dict", &recis::optim::SparseAdagrad::reset_state_dict)
+      .def("zero_grad",
+           [](const c10::intrusive_ptr<recis::optim::SparseAdagrad>& self,
+              c10::optional<bool> set_to_none) {
+             self->zero_grad(set_to_none.value_or(true));
+           })
+      .def("set_grad_accum_steps",
+           [](const c10::intrusive_ptr<recis::optim::SparseAdagrad>& self,
+              const int64_t step) { self->set_grad_accum_steps(step); })
+      .def("set_lr",
+           [](const c10::intrusive_ptr<recis::optim::SparseAdagrad>& self,
+              double lr) { self->set_lr(lr); })
+      .def_static("make", recis::optim::SparseAdagrad::Make);
+
   m.class_<recis::optim::SparseAdamW>("SparseAdamW")
       .def("step", &recis::optim::SparseAdamW::step)
       .def("add_parameters", &recis::optim::SparseAdamW::add_parameters)
-      .def("zero_grad", &recis::optim::SparseAdamW::zero_grad)
       .def("state_dict", &recis::optim::SparseAdamW::state_dict)
       .def("load_state_dict", &recis::optim::SparseAdamW::load_state_dict)
+      .def("reset_state_dict", &recis::optim::SparseAdamW::reset_state_dict)
+      .def("zero_grad",
+           [](const c10::intrusive_ptr<recis::optim::SparseAdamW>& self,
+              c10::optional<bool> set_to_none) {
+             self->zero_grad(set_to_none.value_or(true));
+           })
       .def("set_grad_accum_steps",
-           &recis::optim::SparseAdamW::set_grad_accum_steps)
-      .def("set_lr", &recis::optim::SparseAdamW::set_lr)
+           [](const c10::intrusive_ptr<recis::optim::SparseAdamW>& self,
+              const int64_t step) { self->set_grad_accum_steps(step); })
+      .def("set_lr",
+           [](const c10::intrusive_ptr<recis::optim::SparseAdamW>& self,
+              double lr) { self->set_lr(lr); })
       .def_static("make", recis::optim::SparseAdamW::Make);
 
   m.class_<recis::optim::SparseAdam>("SparseAdam")
       .def("step", &recis::optim::SparseAdam::step)
       .def("add_parameters", &recis::optim::SparseAdam::add_parameters)
-      .def("zero_grad", &recis::optim::SparseAdam::zero_grad)
       .def("state_dict", &recis::optim::SparseAdam::state_dict)
       .def("load_state_dict", &recis::optim::SparseAdam::load_state_dict)
+      .def("reset_state_dict", &recis::optim::SparseAdam::reset_state_dict)
+      .def("zero_grad",
+           [](const c10::intrusive_ptr<recis::optim::SparseAdam>& self,
+              c10::optional<bool> set_to_none) {
+             self->zero_grad(set_to_none.value_or(true));
+           })
       .def("set_grad_accum_steps",
-           &recis::optim::SparseAdam::set_grad_accum_steps)
-      .def("set_lr", &recis::optim::SparseAdam::set_lr)
+           [](const c10::intrusive_ptr<recis::optim::SparseAdam>& self,
+              const int64_t step) { self->set_grad_accum_steps(step); })
+      .def("set_lr",
+           [](const c10::intrusive_ptr<recis::optim::SparseAdam>& self,
+              double lr) { self->set_lr(lr); })
       .def_static("make", recis::optim::SparseAdam::Make);
 
   m.class_<recis::optim::SparseAdamWTF>("SparseAdamWTF")
       .def("step", &recis::optim::SparseAdamWTF::step)
       .def("add_parameters", &recis::optim::SparseAdamWTF::add_parameters)
-      .def("zero_grad", &recis::optim::SparseAdamWTF::zero_grad)
       .def("state_dict", &recis::optim::SparseAdamWTF::state_dict)
       .def("load_state_dict", &recis::optim::SparseAdamWTF::load_state_dict)
+      .def("reset_state_dict", &recis::optim::SparseAdamWTF::reset_state_dict)
+      .def("zero_grad",
+           [](const c10::intrusive_ptr<recis::optim::SparseAdamWTF>& self,
+              c10::optional<bool> set_to_none) {
+             self->zero_grad(set_to_none.value_or(true));
+           })
       .def("set_grad_accum_steps",
-           &recis::optim::SparseAdamWTF::set_grad_accum_steps)
-      .def("set_lr", &recis::optim::SparseAdamWTF::set_lr)
+           [](const c10::intrusive_ptr<recis::optim::SparseAdamWTF>& self,
+              const int64_t step) { self->set_grad_accum_steps(step); })
+      .def("set_lr",
+           [](const c10::intrusive_ptr<recis::optim::SparseAdamWTF>& self,
+              double lr) { self->set_lr(lr); })
       .def_static("make", recis::optim::SparseAdamWTF::Make);
 
   m.def("make_hashtable", Hashtable::Make);

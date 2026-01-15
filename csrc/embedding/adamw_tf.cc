@@ -39,6 +39,7 @@
 #include "embedding/hashtable.h"
 #include "embedding/initializer.h"
 #include "embedding/optim.h"
+#include "embedding/optim_util.h"
 #include "embedding/parallel_util.h"
 #include "ops/block_apply_adamw_op.h"
 #include "torch/types.h"
@@ -46,9 +47,6 @@
 namespace recis {
 namespace optim {
 namespace {
-at::SparseTensorImpl *get_sparse_impl(const at::Tensor &self) {
-  return static_cast<at::SparseTensorImpl *>(self.unsafeGetTensorImpl());
-}
 
 void FusedSparseAdamWTF(torch::Tensor grad, SparseAdamWTFOptions &options,
                         SparseAdamWTFParamState &state) {
@@ -64,8 +62,8 @@ void FusedSparseAdamWTF(torch::Tensor grad, SparseAdamWTFOptions &options,
   auto weight_decay = 1 - options.weight_decay();
   auto eps = options.eps();
 
-  auto index = get_sparse_impl(grad)->indices();
-  auto grad_emb = get_sparse_impl(grad)->values();
+  auto index = utils::get_sparse_impl(grad)->indices();
+  auto grad_emb = utils::get_sparse_impl(grad)->values();
 
   recis::functional::block_apply_adamw(
       index, grad_emb, (*param->Values()), state.beta1(), state.beta2(),
@@ -99,54 +97,24 @@ double SparseAdamWTFOptions::get_lr() const { return lr_; }
 void SparseAdamWTFOptions::set_lr(const double lr) { lr_ = lr; }
 
 void SparseAdamWTF::step() {
-  torch::NoGradGuard no_grad;
-  std::unordered_map<std::string, std::pair<HashTablePtr, torch::Tensor>>
-      var_grads;
-  for (auto &group : param_groups_) {
-    for (auto &it : group.params()) {
-      auto &p = it.second;
-      if (!p.defined()) {
-        continue;
-      }
-      if (!p->HasGrad()) {
-        continue;
-      }
-      const auto &grad = p->Grad(grad_accum_steps_);
-      if (!grad.defined()) {
-        continue;
-      }
-      TORCH_CHECK(grad.is_sparse(), "SparseAdamWTF only support sparse gradients" /*, please consider SparseAdamWTF instead*/);
-      var_grads[it.first] = std::make_pair(p, grad);
-    }
-  }
-  for (auto &group : param_groups_) {
-    for (auto &it : group.params()) {
-      auto var_grad = var_grads.find(it.first);
-      if (var_grad == var_grads.end()) {
-        continue;
-      }
-      auto &options = static_cast<SparseAdamWTFOptions &>(group.options());
-      auto &state = static_cast<SparseAdamWTFParamState &>(
-          *state_[var_grad->second.first.get()]);
-      int64_t param_size = state.param()->Values()->size();
-      TORCH_CHECK(
-          param_size == state.exp_avg()->Values()->size() &&
-              param_size == state.exp_avg_sq()->Values()->size(),
-          "param size and adamw param size mismatch",
-          ", param_size: ", param_size,
-          ", adamw exp_avg size: ", state.exp_avg()->Values()->size(),
-          ", adamw exp_avg_sq size: ", state.exp_avg_sq()->Values()->size());
-      {
+  utils::apply_sparse_step<SparseAdamWTFOptions, SparseAdamWTFParamState>(
+      param_groups_, state_, grad_accum_steps_,
+      [&](const std::string &name, HashTablePtr &p, const torch::Tensor &grad,
+          SparseAdamWTFOptions &options, SparseAdamWTFParamState &state) {
+        int64_t param_size = state.param()->Values()->size();
+        TORCH_CHECK(
+            param_size == state.exp_avg()->Values()->size() &&
+                param_size == state.exp_avg_sq()->Values()->size(),
+            "param size and adamw param size mismatch",
+            ", param_size: ", param_size,
+            ", adamw exp_avg size: ", state.exp_avg()->Values()->size(),
+            ", adamw exp_avg_sq size: ", state.exp_avg_sq()->Values()->size());
         RECORD_FUNCTION(
-            torch::str("FusedSparseAdamWTF", "/", it.first, "/", "Update"),
+            torch::str("FusedSparseAdamWTF", "/", name, "/", "Update"),
             std::vector<c10::IValue>());
-        FusedSparseAdamWTF(var_grad->second.second, options, state);
-      }
-    }
-  }
+        FusedSparseAdamWTF(grad, options, state);
+      });
 }
-
-void SparseAdamWTF::zero_grad() { SparseOptimizer::zero_grad(); }
 
 void SparseAdamWTF::add_param_group(
     const SparseOptimizerParamGroup &param_group) {
@@ -170,7 +138,6 @@ void SparseAdamWTF::add_parameters(
     parameters_[it->key()] = it->value();
   }
 }
-
 void SparseAdamWTF::InitParamState(const std::string &param_name,
                                    HashTablePtr param) {
   TORCH_CHECK(state_.count(param.get()) == 0,
@@ -243,5 +210,8 @@ c10::intrusive_ptr<SparseAdamWTF> SparseAdamWTF::Make(
   }
   return c10::make_intrusive<SparseAdamWTF>(input, option);
 }
+
+void SparseAdamWTF::reset_state_dict() {}
+
 }  // namespace optim
 }  // namespace recis
